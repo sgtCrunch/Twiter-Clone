@@ -113,7 +113,11 @@ def login():
 def logout():
     """Handle logout of user."""
 
-    # IMPLEMENT THIS
+    if CURR_USER_KEY in session:
+        session.pop(CURR_USER_KEY)
+        g.user = None
+    
+    return redirect('/login')
 
 
 ##############################################################################
