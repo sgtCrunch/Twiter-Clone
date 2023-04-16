@@ -117,7 +117,9 @@ def logout():
 
     if CURR_USER_KEY in session:
         session.pop(CURR_USER_KEY)
+        flash(f"Goodbye, {g.user.username}!", "danger")
         g.user = None
+        
     
     return redirect('/login')
 
