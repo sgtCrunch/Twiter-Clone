@@ -1,10 +1,10 @@
 import os
 
-from flask import Flask, render_template, request, flash, redirect, session, g
+from flask import Flask, render_template, request, flash, redirect, session, g, url_for
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
-
-from forms import UserAddForm, LoginForm, MessageForm
+from sqlalchemy import or_
+from forms import UserAddForm, LoginForm, MessageForm, UserUpdateForm
 from models import db, connect_db, User, Message
 
 CURR_USER_KEY = "curr_user"
@@ -160,6 +160,22 @@ def users_show(user_id):
                 .all())
     return render_template('users/show.html', user=user, messages=messages)
 
+@app.route('/users/<int:user_id>/likes')
+def users_likes(user_id):
+    """Show user's likes"""
+
+    user = User.query.get_or_404(user_id)
+
+    # snagging messages in order from the database;
+    # user.likes won't be in order by default
+    likes_id = [msg.id for msg in user.likes]
+    likes = (Message
+                .query
+                .filter(Message.id.in_(likes_id))
+                .order_by(Message.timestamp.desc())
+                .limit(100)
+                .all())
+    return render_template('users/likes.html', user=user, likes=likes, likes_id = likes_id)
 
 @app.route('/users/<int:user_id>/following')
 def show_following(user_id):
@@ -219,7 +235,50 @@ def stop_following(follow_id):
 def profile():
     """Update profile for current user."""
 
-    # IMPLEMENT THIS
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    
+    form = UserUpdateForm()
+
+    if form.validate_on_submit():
+        user = User.authenticate(g.user.username, form.password.data)
+        if not user:
+            flash("Incorrect Password", "danger")
+            return redirect('/users/profile')
+        
+        username = form.username.data
+        email = form.email.data
+        image_url = form.image_url.data
+        header_image_url = form.header_image_url.data
+        bio = form.bio.data
+
+        if g.user.username != username and len(User.query.filter(User.username == username).all()) > 0:
+            flash("Username already Taken", "danger")
+            return redirect('/users/profile')
+        if g.user.email != email and len(User.query.filter(User.email == email).all()) > 0:
+            flash("Email already Taken", "danger")
+            return redirect('/users/profile')
+        
+        user.username = username
+        user.email = email
+        user.img_url = image_url
+        user.header_image_url = header_image_url
+        user.bio = bio
+
+        db.session.commit()
+        
+        return redirect(f'/users/{user.id}')
+    else:
+        form.username.data = g.user.username
+        form.email.data = g.user.email
+        form.image_url.data = g.user.image_url
+        form.header_image_url.data = g.user.header_image_url
+        form.bio.data = g.user.bio
+
+    return render_template('users/update.html', form=form)
+
+
 
 
 @app.route('/users/delete', methods=["POST"])
@@ -237,6 +296,24 @@ def delete_user():
 
     return redirect("/signup")
 
+@app.route('/users/add_like/<int:message_id>', methods=["POST"])
+def add_like(message_id):
+    """Like a message."""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+
+    msg = Message.query.get(message_id)
+    
+    if msg in g.user.likes:
+        g.user.likes.remove(msg)
+    else:
+        g.user.likes.append(msg)
+    
+    db.session.commit()
+
+    return redirect(f'/users/{g.user.id}/likes')
 
 ##############################################################################
 # Messages routes:
@@ -300,13 +377,15 @@ def homepage():
     """
 
     if g.user:
+        f = [user.id for user in g.user.following]
         messages = (Message
                     .query
+                    .filter(or_(Message.user_id.in_(f), Message.user_id == g.user.id))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
-
-        return render_template('home.html', messages=messages)
+        likes = [mgs.id for mgs in g.user.likes]
+        return render_template('home.html', messages=messages, likes = likes)
 
     else:
         return render_template('home-anon.html')
