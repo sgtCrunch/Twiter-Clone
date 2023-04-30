@@ -25,49 +25,100 @@ from app import app, CURR_USER_KEY
 # Create our tables (we do this here, so we only create the tables
 # once for all tests --- in each test, we'll delete the data
 # and create fresh new clean test data
+with app.app_context():
+    db.create_all()
 
-db.create_all()
+    # Don't have WTForms use CSRF at all, since it's a pain to test
 
-# Don't have WTForms use CSRF at all, since it's a pain to test
-
-app.config['WTF_CSRF_ENABLED'] = False
+    app.config['WTF_CSRF_ENABLED'] = False
 
 
-class MessageViewTestCase(TestCase):
-    """Test views for messages."""
+    class MessageViewTestCase(TestCase):
+        """Test views for messages."""
 
-    def setUp(self):
-        """Create test client, add sample data."""
+        def setUp(self):
+            """Create test client, add sample data."""
 
-        User.query.delete()
-        Message.query.delete()
+            User.query.delete()
+            Message.query.delete()
 
-        self.client = app.test_client()
+            self.client = app.test_client()
 
-        self.testuser = User.signup(username="testuser",
-                                    email="test@test.com",
-                                    password="testuser",
-                                    image_url=None)
+            self.testuser = User.signup(username="testuser",
+                                        email="test@test.com",
+                                        password="testuser",
+                                        image_url=None)
 
-        db.session.commit()
+            db.session.commit()
 
-    def test_add_message(self):
-        """Can use add a message?"""
+        def test_add_message(self):
+            """Can use add a message?"""
 
-        # Since we need to change the session to mimic logging in,
-        # we need to use the changing-session trick:
+            # Since we need to change the session to mimic logging in,
+            # we need to use the changing-session trick:
 
-        with self.client as c:
-            with c.session_transaction() as sess:
-                sess[CURR_USER_KEY] = self.testuser.id
+            with self.client as c:
+                with c.session_transaction() as sess:
+                    sess[CURR_USER_KEY] = self.testuser.id
 
-            # Now, that session setting is saved, so we can have
-            # the rest of ours test
+                # Now, that session setting is saved, so we can have
+                # the rest of ours test
 
-            resp = c.post("/messages/new", data={"text": "Hello"})
+                resp = c.post("/messages/new", data={"text": "Hello"})
 
-            # Make sure it redirects
-            self.assertEqual(resp.status_code, 302)
+                # Make sure it redirects
+                self.assertEqual(resp.status_code, 302)
 
-            msg = Message.query.one()
-            self.assertEqual(msg.text, "Hello")
+                msg = Message.query.one()
+                self.assertEqual(msg.text, "Hello")
+
+        def test_show_messages(self):
+            """Can I see all messages"""
+
+            with self.client as c:
+                with c.session_transaction() as sess:
+                    sess[CURR_USER_KEY] = self.testuser.id
+
+                resp = c.post("/messages/new", data={"text": "Hello"})
+                self.assertEqual(resp.status_code, 302)
+
+                
+                show = c.get('/messages/new')
+                html = show.get_data(as_text=True)
+                self.assertIn('Hello', html)
+
+
+        def test_show_message(self):
+            """Check show message route"""
+
+            with self.client as c:
+                with c.session_transaction() as sess:
+                    sess[CURR_USER_KEY] = self.testuser.id
+
+                resp = c.post("/messages/new", data={"text": "Hello"})
+                self.assertEqual(resp.status_code, 302)
+
+                msg = Message.query.one()
+
+                show = c.get(f'/messages/{msg.id}')
+                html = show.get_data(as_text=True)
+                self.assertIn('Hello', html)
+
+
+        def test_delete_message(self):
+            """Check if message can be deleted"""
+
+            with self.client as c:
+                with c.session_transaction() as sess:
+                    sess[CURR_USER_KEY] = self.testuser.id
+                
+
+                resp = c.post("/messages/new", data={"text": "Hello"})
+                self.assertEqual(resp.status_code, 302)
+                msg = Message.query.one()
+
+                delete = c.post(f"/messages/{msg.id}/delete")
+
+                msg = Message.query.one_or_none()
+                self.assertEquals(msg, None)
+
